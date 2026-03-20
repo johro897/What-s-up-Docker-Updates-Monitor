@@ -1,43 +1,95 @@
-
-# What's up Docker Updates Monitor
+# What's Up Docker Updates Monitor
 
 ## About
 
-This integration grabs info from a What's up Docker instance using the Rest API, creating a sensor per container indicating if there are updates available.
-It will also assign all sensors from the same instance to the a device, making it easier to manage if you have multiple instances of What's up Docker
+This integration fetches container information from a [What's Up Docker](https://github.com/getwud/wud) instance using its REST API, creating one sensor per monitored container indicating whether updates are available.
+
+### Features
+
+- **Per-container sensors** — tracks update status, current version, and new version for each container
+- **Version details** — shows `current_version` and `new_version` using OCI image labels for accurate version strings
+- **Update age** — when an update is available, `available_since` and `days_available` show how long the new version has been out
+- **Compose project grouping** — containers sharing the same Docker Compose project are grouped under one device in HA, making setups with many containers (e.g. multiple game servers) much easier to manage
+- **Multi-instance support** — add multiple WUD instances, each gets its own set of devices and sensors
+- **Connection validation** — the integration tests the connection to WUD before saving, with clear error feedback if it fails
+
+### Sensor attributes
+
+| Attribute | Description |
+|---|---|
+| `current_version` | Currently running version |
+| `new_version` | Available update version (`–` if none) |
+| `available_since` | When the new image was published (UTC) |
+| `days_available` | Days since the new version became available |
+| `semver_diff` | Severity of update: `patch`, `minor` or `major` |
+| `image` | Full image name (e.g. `esphome/esphome`) |
+| `registry` | Registry name (e.g. `ghcr.public`, `hub.public`) |
+| `compose_project` | Docker Compose project name |
+| `status` | Container status (e.g. `running`) |
+
+---
 
 ## Installation
 
-Installation is done like any other Home Assistant HACS integration.
-
 ### Requirements
 
-[](https://github.com/meichthys/uptime_kuma/blob/main/README.md#requirements)
-
-In order to setup this integration you will need:
-
--   A Home Assistant instance with [HACS](https://hacs.xyz/) installed.
--   An instance of [What's up Docker](https://github.com/fmartinou/whats-up-docker)
+- A Home Assistant instance with [HACS](https://hacs.xyz/) installed
+- A running instance of [What's Up Docker](https://github.com/getwud/wud) (tested with WUD 8.2+)
 
 ### HACS Installation
 
-Search for "What's up Docker Updates Monitor" in the HACS store. If you don't see it there, you can [add this repository url as a HACS custom repository](https://hacs.xyz/docs/faq/custom_repositories).
+Search for **"What's Up Docker Updates Monitor"** in the HACS store. If it doesn't appear, add this repository as a [HACS custom repository](https://hacs.xyz/docs/faq/custom_repositories).
 
-[![hacs_badge](https://camo.githubusercontent.com/e983f5420af8b0d8284a16e6127d04146f0a19aa559a11698056dbd42c4de1af/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f484143532d437573746f6d2d3431424446352e7376673f7374796c653d666f722d7468652d6261646765)](https://github.com/pveiga90/What-s-up-Docker-Updates-Monitor)
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/pveiga90/What-s-up-Docker-Updates-Monitor)
 
-## Home Assistant Integration
+---
 
-After installation, setup the integration via the web UI like any other integration. When prompted, provide the following:
+## Configuration
 
--   **Host:** *Your What's up Docker IP Address or hostname*
--   **Port:** *the port for the Web UI of What's up Docker*
--   **Instance_Name:** *This will be the "device" all sensors get associated to*
+After installation, add the integration via **Settings → Devices & Services → Add Integration** and search for *What's Up Docker*.
 
+When prompted, provide:
 
-### Troubleshooting
+| Field | Description |
+|---|---|
+| **Host** | IP address or hostname of your WUD instance |
+| **Port** | WUD web UI port (default: `3000`) |
+| **Instance Name** | A friendly name for this WUD instance (used as the device name in HA) |
 
-If you are having issues connecting, make sure you can successfully connect to `http://<wud_host>:3000/api/containers`. This should retrive a JSON with all your monitored containers info.
+Settings can be changed later via the integration's **Configure** button.
+
+### WUD container labels
+
+For WUD to monitor a container, make sure it has the `wud.watch: "true"` label in your `docker-compose.yml`:
+
+```yaml
+labels:
+  - "wud.watch=true"
+```
+
+To stay on the same version track and avoid pre-release or variant tags, use `wud.tag.include`:
+
+```yaml
+labels:
+  - "wud.watch=true"
+  - "wud.tag.include=^2\\.0\\.\\d+$"       # SemVer: stay on 2.0.x
+  - "wud.tag.include=^20[0-9]{2}\\.[0-9]+\\.[0-9]+$"  # CalVer: stay on same year.month.x
+```
+
+---
+
+## Troubleshooting
+
+If the integration fails to connect, verify that the WUD API is reachable:
+
+```
+http://<wud_host>:<wud_port>/api/containers
+```
+
+This should return a JSON array of your monitored containers. If it doesn't, check that WUD is running and that no firewall is blocking the port.
+
+---
 
 ## Contributions
 
-Contributions are welcome!
+Contributions are welcome! Feel free to open an issue or pull request.
