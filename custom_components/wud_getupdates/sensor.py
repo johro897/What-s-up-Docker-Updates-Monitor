@@ -1,5 +1,6 @@
 import logging
 import aiohttp
+from datetime import datetime, timezone
 from homeassistant.helpers.entity import Entity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -32,6 +33,35 @@ async def get_containers(host, port):
             return []
 
 
+def _get_compose_project(container):
+    """Hämta compose project-namn från labels."""
+    labels = container.get("labels", {}) or {}
+    return labels.get("com.docker.compose.project", None)
+
+
+def _build_device_info(domain, config_entry, instance_name, container):
+    """
+    Bygg device_info baserat på compose project.
+    Containers i samma project grupperas under samma device.
+    Containers utan project hamnar under instansens huvud-device.
+    """
+    project = _get_compose_project(container)
+
+    if project:
+        device_id = f"{config_entry.entry_id}_{project}"
+        device_name = f"{instance_name} – {project}"
+    else:
+        device_id = config_entry.entry_id
+        device_name = instance_name
+
+    return {
+        "identifiers": {(domain, device_id)},
+        "name": device_name,
+        "manufacturer": "What's Up Docker",
+        "model": "Docker Compose Project" if project else "Docker Instance",
+    }
+
+
 class WUDContainerSensor(Entity):
     """Representation of a What's Up Docker container sensor."""
 
@@ -41,17 +71,13 @@ class WUDContainerSensor(Entity):
         self._instance_name = instance_name
         self._name = f"{container['name']} Update Available"
         self._unique_id = f"wud_{container['id']}_update_available"
-        self._device_info = {
-            "identifiers": {(DOMAIN, config_entry.entry_id)},
-            "name": instance_name,
-            "manufacturer": "What's Up Docker",
-            "model": "Docker Instance",
-        }
+        self._device_info = _build_device_info(
+            DOMAIN, config_entry, instance_name, container
+        )
 
     def _get_current_version(self):
         """
-        Hämta nuvarande version.
-        Föredrar org.opencontainers.image.version (innehåller full version, t.ex. 2026.2.4)
+        Föredrar org.opencontainers.image.version (full version, t.ex. 2026.2.4)
         framför image.tag.value som kan vara förkortad (t.ex. 2026.2).
         """
         labels = self._container.get("labels", {}) or {}
@@ -74,6 +100,23 @@ class WUDContainerSensor(Entity):
             return tag
         return None
 
+    def _get_image_created(self):
+        """Hämta när den nya imagen skapades (= när uppdateringen blev tillgänglig)."""
+        image = self._container.get("image", {}) or {}
+        created_str = image.get("created")
+        if not created_str:
+            return None, None
+
+        try:
+            # Hantera både 'Z' och '+00:00' suffix
+            created_str = created_str.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(created_str)
+            now = datetime.now(timezone.utc)
+            days = (now - dt).days
+            return dt.strftime("%Y-%m-%d %H:%M UTC"), days
+        except (ValueError, TypeError):
+            return None, None
+
     @property
     def unique_id(self):
         return self._unique_id
@@ -93,13 +136,14 @@ class WUDContainerSensor(Entity):
     @property
     def extra_state_attributes(self):
         update_kind = self._container.get("updateKind", {}) or {}
-        current = self._get_current_version()
-        new = self._get_new_version()
-
         image = self._container.get("image", {}) or {}
         registry = image.get("registry", {}) or {}
 
-        return {
+        current = self._get_current_version()
+        new = self._get_new_version()
+        available_since, days_available = self._get_image_created()
+
+        attrs = {
             "container_id": self._container["id"],
             "image": image.get("name", "unknown"),
             "registry": registry.get("name", "unknown"),
@@ -108,7 +152,15 @@ class WUDContainerSensor(Entity):
             "update_available": self._container.get("updateAvailable", False),
             "semver_diff": update_kind.get("semverDiff"),
             "status": self._container.get("status", "unknown"),
+            "compose_project": _get_compose_project(self._container) or "–",
         }
+
+        # Lägg bara till datum-attribut om det finns en uppdatering
+        if self._container.get("updateAvailable", False) and available_since:
+            attrs["available_since"] = available_since
+            attrs["days_available"] = days_available
+
+        return attrs
 
     async def async_update(self):
         """Hämta uppdaterad data från WUD API."""
