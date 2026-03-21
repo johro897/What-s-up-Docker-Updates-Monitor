@@ -70,7 +70,9 @@ class WUDContainerSensor(Entity):
         self._config_entry = config_entry
         self._instance_name = instance_name
         self._name = f"{container['name']} Update Available"
-        self._unique_id = f"wud_{container['id']}_update_available"
+        # Använder namn + entry_id istället för container-ID
+        # Container-ID ändras vid varje uppdatering, namnet är stabilt
+        self._unique_id = f"wud_{config_entry.entry_id}_{container['name']}_update_available"
         self._device_info = _build_device_info(
             DOMAIN, config_entry, instance_name, container
         )
@@ -169,6 +171,8 @@ class WUDContainerSensor(Entity):
             self._config_entry.data["port"],
         )
         for c in containers:
-            if c["id"] == self._container["id"]:
+            # Matcha på namn — container-ID ändras vid uppdatering, namnet är stabilt
+            if c["name"] == self._container["name"]:
                 self._container = c
+                self._state = c.get("updateAvailable", False)
                 break
