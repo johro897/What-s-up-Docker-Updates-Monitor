@@ -1,3 +1,4 @@
+REPO to be closed - Moved over to my own version instead https://github.com/johro897/wud-monitor
 # What's Up Docker Updates Monitor
 
 ## About
